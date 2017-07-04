@@ -10,19 +10,27 @@ if not defined duration set duration="02:00:00"
 @set ffmpeg=C:\Program Files\ffmpeg\bin\ffmpeg.exe
 @set sox=C:\Program Files (x86)\sox-14-4-1\sox.exe
 
+
+"%ffmpeg%" ^
+  -i intro-faded.mkv ^
+  -ar 22050 ^
+  -map 0:1 intro_faded_adhoc.wav
+
 "%ffmpeg%" ^
   -ss %startAt% ^
   -t %duration% ^
   -i %infile% ^
+  -ar 22050 ^
   -map 0:1 "%outfile%_game.wav"
 
 "%ffmpeg%" ^
   -ss %startAt% ^
   -t %duration% ^
   -i %infile% ^
+  -ar 22050 ^
   -map 0:2 "%outfile%_ts.wav"
 
-"%sox%" -M intro-faded.wav "%outfile%_game.wav" "%outfile%_ts.wav" "%outfile%.wav" remix -m 1,3,5 2,4,5
+"%sox%" -M intro_faded_adhoc.wav "%outfile%_game.wav" "%outfile%_ts.wav" "%outfile%.wav" remix -m 1,3,5 2,4,5
  
 "%ffmpeg%" ^
     -ss %startAt% ^
