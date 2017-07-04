@@ -43,7 +43,6 @@ if (!isset($argv[1])) {
 }
 
 $cutfile = $argv[1];
-$sourcefile = '';
 
 class ConcatPart {
 	public $sourceFile;
@@ -56,11 +55,6 @@ function sourceFilenameToOutfilename($sourceFilename) {
 	return $sourceFilename . ".out.mkv";
 }
 
-$cutfile = file_get_contents($cutfile);
-if (!$cutfile) {
-	echo "cutfile not found or empty\n";
-	exit;
-}
 
 class Padding {
     /**
@@ -91,15 +85,81 @@ class Padding {
     }
 }
 
-class LineMap {
-    public static function getConcatPart($mode, $line) {
-        global $sourcefile;
+class Parser {
+
+    /**
+     * @var
+     */
+    private $currentSourceFile;
+
+    /**
+     * @var string
+     */
+    private $cutfile;
+
+    /**
+     * @var ConcatPart[]
+     */
+    private $parts;
+
+    public function __construct(string $cutfile)
+    {
+        $this->cutfile = $cutfile;
+    }
+
+    private function doParse() {
+
+        $cutfile = file_get_contents($this->cutfile);
+        if (!$cutfile) {
+            echo "cutfile not found or empty\n";
+            exit;
+        }
+
+        $lines = array_filter(array_trim(array_map(function ($line) {
+            return explode('#', $line)[0];
+        }, explode("\n", $cutfile))));
+
+        $parts = [];
+
+        array_walk($lines, function ($part) use (&$parts) {
+
+            $lineBits = explode(" ", trim($part), 2);
+
+            $methodName = 'do_' . $lineBits[0];
+            if (!method_exists(Parser::class, $methodName)) {
+                echo "WARN: unknown line: $part\n";
+                return null;
+            }
+
+            $newPart = $this->$methodName($lineBits[1]);
+            if (!is_array($newPart)) {
+                $newPart = [$newPart];
+            }
+            $parts = array_merge($parts, $newPart);
+        });
+        $this->parts = array_filter($parts);
+    }
+
+    /**
+     * @return ConcatPart[]
+     */
+    public function getConcatParts(): array {
+        $this->doParse();
+        return $this->parts;
+    }
+
+    public function getCurrentSourceFile(): string
+    {
+        return $this->currentSourceFile;
+    }
+
+    public function getConcatPart($mode, $line) {
 
         $lineBits = explode(" ", $line);
         $lineBits = array_filter(array_map('trim', $lineBits));
 
         $part = new ConcatPart();
-        $part->sourceFile = $sourcefile;
+        $part->sourceFile = $this->currentSourceFile;
         $part->mode = $mode;
         echo "DEBUG: " . json_encode($lineBits) . "\n";
         fill_object($part, $lineBits, ['from', 'to']);
@@ -111,29 +171,28 @@ class LineMap {
 
         return $part;
     }
-    public static function do_i($line) {
-        return self::getConcatPart('i', $line);
+    public function do_i($line) {
+        return $this->getConcatPart('i', $line);
     }
-    public static function do_n($line) {
-        return self::getConcatPart('n', $line);
+    public function do_n($line) {
+        return $this->getConcatPart('n', $line);
     }
-    public static function do_f($line) {
-        return self::getConcatPart('f', $line);
+    public function do_f($line) {
+        return $this->getConcatPart('f', $line);
     }
-    public static function do_p($line) {
-        global $sourcefile;
-        $sourcefile = trim($line);
+    public function do_p($line) {
+        $this->currentSourceFile = trim($line);
     }
-    public static function do_if($line) {
-        $middlePart = self::do_i($line);
+    public function do_if($line) {
+        $middlePart = $this->do_i($line);
         $padding = new Padding($middlePart);
         return [
             $middlePart,
             $padding->getRightPaddingPart(),
         ];
     }
-    public static function do_fnf($line) {
-        $middlePart = LineMap::do_n($line);
+    public function do_fnf($line) {
+        $middlePart = $this->do_n($line);
         $padding = new Padding($middlePart);
         return [
             $padding->getLeftPaddingPart(),
@@ -141,16 +200,16 @@ class LineMap {
             $padding->getRightPaddingPart(),
         ];
     }
-    public static function do_nf($line) {
-        $middlePart = LineMap::do_n($line);
+    public function do_nf($line) {
+        $middlePart = $this->do_n($line);
         $padding = new Padding($middlePart);
         return [
             $middlePart,
             $padding->getRightPaddingPart(),
         ];
     }
-    public static function do_fn($line) {
-        $middlePart = LineMap::do_n($line);
+    public function do_fn($line) {
+        $middlePart = $this->do_n($line);
         $padding = new Padding($middlePart);
         return [
             $padding->getLeftPaddingPart(),
@@ -159,6 +218,7 @@ class LineMap {
     }
 }
 
+$parts = (new Parser($cutfile))->getConcatParts();
 
 $modeMap = [
     'i' => 'do_ffmpeg_introed.bat',
@@ -166,37 +226,14 @@ $modeMap = [
     'f' => 'do_ffmpeg_x4.bat',
 ];
 
-$lines = array_filter(array_trim(array_map(function ($line) {
-	return explode('#', $line)[0];
-}, explode("\n", $cutfile))));
+$sourceFiles = implode(', ', array_unique(array_map(function (ConcatPart $part) { return $part->sourceFile; }, $parts)));
 
-$parts = [];
-
-array_walk($lines, function ($part) use (&$parts) {
-
-    $lineBits = explode(" ", trim($part), 2);
-
-    $methodName = 'do_' . $lineBits[0];
-    if (!method_exists(LineMap::class, $methodName)) {
-        echo "WARN: unknown line: $part\n";
-        return null;
-    }
-
-    $newPart = LineMap::$methodName($lineBits[1]);
-    if (!is_array($newPart)) {
-        $newPart = [$newPart];
-    }
-    $parts = array_merge($parts, $newPart);
-});
-$parts = array_filter($parts);
-
-
-echo "source: $sourcefile, cutfile: $cutfile\n. starting in 5s...\n";
+echo "sourcefiles: $$sourceFiles; cutfile: $cutfile\n. starting in 5s...\n";
 sleep(5);
 
-$filestoconcat = array_map(function (ConcatPart $part, $idx) use ($modeMap) {
+$filestoconcat = array_map(function (ConcatPart $part) use ($modeMap) {
 	$outFilename = sourceFilenameToOutfilename($part->sourceFile);
-	$outConcatFilename = sprintf("%s-%s.mkv", $outFilename, $idx);
+	$outConcatFilename = sprintf("%s-%s-%s.mkv", $outFilename, $part->from, $part->to);
 	if (file_exists($outConcatFilename)) {
 		echo "$outConcatFilename already exists, skipping...\n";
 		return $outConcatFilename;
@@ -217,7 +254,7 @@ $filestoconcat = array_map(function (ConcatPart $part, $idx) use ($modeMap) {
 	return $outConcatFilename;
 }, $parts, array_keys($parts));
 
-$concatFilename = "$sourcefile.concatfile";
+$concatFilename = "$cutfile.concatfile";
 
 file_put_contents($concatFilename, implode("\r\n", array_map(function ($f) {
 	return "file $f";
