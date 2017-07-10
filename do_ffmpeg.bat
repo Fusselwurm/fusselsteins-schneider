@@ -23,6 +23,7 @@ if not defined duration set duration="02:00:00"
   -t %duration% ^
   -i %infile% ^
   -ar 22050 ^
+  -af "volume=0.3" ^
   -map 0:2 "%outfile%_ts.wav"
 
 "%sox%" -M "%outfile%_game.wav" "%outfile%_ts.wav" "%outfile%.wav" remix -m 1,3 2,3

@@ -49,12 +49,28 @@ class ConcatPart {
 	public $mode;
 	public $from; 
 	public $to;
+	
+	public function getFilename(): string {
+		$outFilename = $this->sourceFilenameToOutfilename($this->sourceFile);
+		return sprintf("%s-%s-%s.mkv", 
+			$outFilename, 
+			$this->sanitizeForFilename($this->from), 
+			$this->sanitizeForFilename($this->to)
+		);
+	}
+	
+	public function getOutFilename(): string  {
+		return $this->sourceFilenameToOutfilename($this->sourceFile);
+	}
+	
+	private function sanitizeForFilename($string): string {
+		return str_replace(':', '', $string);
+	}
+	
+	private  function sourceFilenameToOutfilename($sourceFilename) {
+		return $sourceFilename . ".out.mkv";
+	}
 }
-
-function sourceFilenameToOutfilename($sourceFilename) {
-	return $sourceFilename . ".out.mkv";
-}
-
 
 class Padding {
     /**
@@ -228,12 +244,12 @@ $modeMap = [
 
 $sourceFiles = implode(', ', array_unique(array_map(function (ConcatPart $part) { return $part->sourceFile; }, $parts)));
 
-echo "sourcefiles: $$sourceFiles; cutfile: $cutfile\n. starting in 5s...\n";
+echo "sourcefiles: $sourceFiles; cutfile: $cutfile\n. starting in 5s...\n";
 sleep(5);
 
 $filestoconcat = array_map(function (ConcatPart $part) use ($modeMap) {
-	$outFilename = sourceFilenameToOutfilename($part->sourceFile);
-	$outConcatFilename = sprintf("%s-%s-%s.mkv", $outFilename, $part->from, $part->to);
+	$outFilename = $part->getOutFilename();
+	$outConcatFilename = $part->getFilename();
 	if (file_exists($outConcatFilename)) {
 		echo "$outConcatFilename already exists, skipping...\n";
 		return $outConcatFilename;
