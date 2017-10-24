@@ -24,7 +24,7 @@ date_default_timezone_set('UTC') ;
 
 error_reporting(E_ALL);
 set_error_handler(function ($errno, $errstr, $errfile, $errline ) {
-    throw new ErrorException($errstr, 0, $errno, $errfile, $errline);
+	throw new ErrorException($errstr, 0, $errno, $errfile, $errline);
 });
 
 function fill_object($obj, $arr, $keys) {
@@ -37,6 +37,19 @@ function array_trim($array) {
 	return array_map(function ($bit) { return trim($bit); }, $array);
 }
 
+function stringToTime(string $timeString): DateTime {
+    if (!preg_match('/^([0-9]{2}:)?([0-9]{2}):([0-9]{2})$/', $timeString)) {
+        throw new UnexpectedValueException('time string must be of format nn:nn:nn or nn:nn, but was ' . json_encode($timeString));
+    }
+    $timeString = trim($timeString);
+
+    if (strlen($timeString) === 5) {
+        $timeString = "00:" . $timeString;
+    }
+
+    return new DateTime('0000-00-00 ' .$timeString);
+}
+
 if (!isset($argv[1])) {
     echo sprintf("usage: php %s %s", __FILE__, "<cutfile.txt>");
     exit(1);
@@ -47,15 +60,23 @@ $cutfile = $argv[1];
 class ConcatPart {
 	public $sourceFile;
 	public $mode;
-	public $from; 
+
+    /**
+     * @var DateTime
+     */
+	public $from;
+
+    /**
+     * @var DateTime
+    */
 	public $to;
 	
 	public function getFilename(): string {
 		$outFilename = $this->sourceFilenameToOutfilename($this->sourceFile);
 		return sprintf("%s-%s-%s.mkv", 
 			$outFilename, 
-			$this->sanitizeForFilename($this->from), 
-			$this->sanitizeForFilename($this->to)
+			$this->dateTimeToFilenamePart($this->from),
+			$this->dateTimeToFilenamePart($this->to)
 		);
 	}
 	
@@ -63,11 +84,11 @@ class ConcatPart {
 		return $this->sourceFilenameToOutfilename($this->sourceFile);
 	}
 	
-	private function sanitizeForFilename($string): string {
-		return str_replace(':', '', $string);
+	private function dateTimeToFilenamePart(DateTime $time): string {
+	    return $time->format('His');
 	}
 	
-	private  function sourceFilenameToOutfilename($sourceFilename) {
+	private  function sourceFilenameToOutfilename(string $sourceFilename) {
 		return $sourceFilename . ".out.mkv";
 	}
 }
@@ -83,15 +104,15 @@ class Padding {
     }
     public function getLeftPaddingPart() {
         $paddingPart = clone $this->part;
-        $paddingPart->to = $this->part->from;
-        $paddingPart->from = (new DateTime($this->part->from))->sub($this->getInterval())->format('H:i:s');
+        $paddingPart->to = clone $this->part->from;
+        $paddingPart->from = (clone $this->part->from)->sub($this->getInterval());
         $paddingPart->mode = 'f';
         return $paddingPart;
     }
     public function getRightPaddingPart() {
         $paddingPart = clone $this->part;
-        $paddingPart->from = $this->part->to;
-        $paddingPart->to = (new DateTime($this->part->to))->add($this->getInterval())->format('H:i:s');
+        $paddingPart->from = clone $this->part->to;
+        $paddingPart->to = (clone $this->part->to)->add($this->getInterval());
         $paddingPart->mode = 'f';
         return $paddingPart;
     }
@@ -177,13 +198,9 @@ class Parser {
         $part = new ConcatPart();
         $part->sourceFile = $this->currentSourceFile;
         $part->mode = $mode;
-        echo "DEBUG: " . json_encode($lineBits) . "\n";
-        fill_object($part, $lineBits, ['from', 'to']);
 
-        if (strlen($part->from) === 5) { $part->from = "00:" . $part->from; }
-        if (strlen($part->to) === 5) { $part->to = "00:" . $part->to; }
-        if (!preg_match('/^[0-9]{2}:[0-9]{2}:[0-9]{2}$/', $part->from)) { throw new RuntimeException('invalid "from" input '); }
-        if (!preg_match('/^[0-9]{2}:[0-9]{2}:[0-9]{2}$/', $part->to)) { throw new RuntimeException('invalid "to" input '); }
+        $part->from = stringToTime($lineBits[0]);
+        $part->to = stringToTime($lineBits[1]);
 
         return $part;
     }
@@ -244,7 +261,21 @@ $modeMap = [
 
 $sourceFiles = implode(', ', array_unique(array_map(function (ConcatPart $part) { return $part->sourceFile; }, $parts)));
 
+$totalLength = array_sum(array_map(function (ConcatPart $part) {
+    return $part->to->diff($part->from)->s;
+}, $parts));
+echo "total length: " . $totalLength . "s\n";
+echo "details:\n";
+echo implode("\n", array_map(function (ConcatPart $part) {
+    return implode(" ", [
+        $part->sourceFile,
+        $part->from->format('H:i:s'),
+        $part->to->format('H:i:s')
+    ]);
+}, $parts)) . "\n";
 echo "sourcefiles: $sourceFiles; cutfile: $cutfile\n. starting in 5s...\n";
+
+
 sleep(5);
 
 $filestoconcat = array_map(function (ConcatPart $part) use ($modeMap) {
@@ -260,11 +291,10 @@ $filestoconcat = array_map(function (ConcatPart $part) use ($modeMap) {
 		echo "unknown mode {$part->mode}\n";
 	}
 
-	$datetime1 = new DateTime($part->from);
-	$datetime2 = new DateTime($part->to);
-	$interval = $datetime2->diff($datetime1);
+	$lengthString = $part->to->diff($part->from)->format('%H:%I:%s'); // NOTE: interval formatting != date formatting :/
+    $offsetString = $part->from->format('H:i:s');
 	
-	passthru(sprintf("%s %s %s %s", $exec, $part->sourceFile, $part->from, $interval->format('%H:%I:%s')));
+	passthru(sprintf("%s %s %s %s", $exec, $part->sourceFile, $offsetString, $lengthString));
 	
 	rename($outFilename, $outConcatFilename);
 	return $outConcatFilename;
