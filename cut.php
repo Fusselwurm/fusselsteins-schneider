@@ -24,7 +24,7 @@ date_default_timezone_set('UTC') ;
 
 error_reporting(E_ALL);
 set_error_handler(function ($errno, $errstr, $errfile, $errline ) {
-    throw new ErrorException($errstr, 0, $errno, $errfile, $errline);
+	throw new ErrorException($errstr, 0, $errno, $errfile, $errline);
 });
 
 function fill_object($obj, $arr, $keys) {
@@ -37,6 +37,19 @@ function array_trim($array) {
 	return array_map(function ($bit) { return trim($bit); }, $array);
 }
 
+function stringToTime(string $timeString): DateTime {
+    if (!preg_match('/^([0-9]{2}:)?([0-9]{2}):([0-9]{2})$/', $timeString)) {
+        throw new UnexpectedValueException('time string must be of format nn:nn:nn or nn:nn, but was ' . json_encode($timeString));
+    }
+    $timeString = trim($timeString);
+
+    if (strlen($timeString) === 5) {
+        $timeString = "00:" . $timeString;
+    }
+
+    return new DateTime('0000-00-00 ' .$timeString);
+}
+
 if (!isset($argv[1])) {
     echo sprintf("usage: php %s %s", __FILE__, "<cutfile.txt>");
     exit(1);
@@ -47,15 +60,28 @@ $cutfile = $argv[1];
 class ConcatPart {
 	public $sourceFile;
 	public $mode;
-	public $from; 
+
+    /**
+     * @var DateTime
+     */
+	public $from;
+
+    /**
+     * @var DateTime
+    */
 	public $to;
+
+    /**
+     * @var string nots|nosound
+     */
+    public $modifier;
 	
 	public function getFilename(): string {
 		$outFilename = $this->sourceFilenameToOutfilename($this->sourceFile);
 		return sprintf("%s-%s-%s.mkv", 
 			$outFilename, 
-			$this->sanitizeForFilename($this->from), 
-			$this->sanitizeForFilename($this->to)
+			$this->dateTimeToFilenamePart($this->from),
+			$this->dateTimeToFilenamePart($this->to)
 		);
 	}
 	
@@ -63,11 +89,11 @@ class ConcatPart {
 		return $this->sourceFilenameToOutfilename($this->sourceFile);
 	}
 	
-	private function sanitizeForFilename($string): string {
-		return str_replace(':', '', $string);
+	private function dateTimeToFilenamePart(DateTime $time): string {
+	    return $time->format('His');
 	}
 	
-	private  function sourceFilenameToOutfilename($sourceFilename) {
+	private  function sourceFilenameToOutfilename(string $sourceFilename) {
 		return $sourceFilename . ".out.mkv";
 	}
 }
@@ -83,16 +109,18 @@ class Padding {
     }
     public function getLeftPaddingPart() {
         $paddingPart = clone $this->part;
-        $paddingPart->to = $this->part->from;
-        $paddingPart->from = (new DateTime($this->part->from))->sub($this->getInterval())->format('H:i:s');
+        $paddingPart->to = clone $this->part->from;
+        $paddingPart->from = (clone $this->part->from)->sub($this->getInterval());
         $paddingPart->mode = 'f';
+        $paddingPart->modifier = '';
         return $paddingPart;
     }
     public function getRightPaddingPart() {
         $paddingPart = clone $this->part;
-        $paddingPart->from = $this->part->to;
-        $paddingPart->to = (new DateTime($this->part->to))->add($this->getInterval())->format('H:i:s');
+        $paddingPart->from = clone $this->part->to;
+        $paddingPart->to = (clone $this->part->to)->add($this->getInterval());
         $paddingPart->mode = 'f';
+        $paddingPart->modifier = '';
         return $paddingPart;
     }
 
@@ -131,29 +159,44 @@ class Parser {
             exit;
         }
 
-        $lines = array_filter(array_trim(array_map(function ($line) {
+        $lines = array_values(array_filter(array_trim(array_map(function ($line) {
             return explode('#', $line)[0];
-        }, explode("\n", $cutfile))));
+        }, explode("\n", $cutfile)))));
 
         $parts = [];
 
-        array_walk($lines, function ($part) use (&$parts) {
+        array_walk($lines, function ($line) use (&$parts) {
 
-            $lineBits = explode(" ", trim($part), 2);
+            list($mode, $a, $b, $c) = array_pad(array_values(array_filter(array_trim(explode(" ", $line)))), 4, '');
 
-            $methodName = 'do_' . $lineBits[0];
-            if (!method_exists(Parser::class, $methodName)) {
-                echo "WARN: unknown line: $part\n";
-                return null;
+            if ($mode === 'p') {
+                $this->do_p($a);
+                return;
             }
 
-            $newPart = $this->$methodName($lineBits[1]);
-            if (!is_array($newPart)) {
-                $newPart = [$newPart];
-            }
-            $parts = array_merge($parts, $newPart);
+            $methods = str_split($mode);
+
+            array_walk($methods, function (string $method, int $index) use ($a, $b, $c, $methods, &$parts) {
+                if (in_array($method, ['i', 'f', 'n'])) {
+                    $numberOfParts = count($methods);
+                    if ($method === 'f' && $numberOfParts > 1) {
+                        $padding = new Padding($this->getConcatPart('n', $a, $b, $c));
+                        if ($index === 0) {
+                            $parts[] = $padding->getLeftPaddingPart();
+                        } else if ($index === $numberOfParts - 1) {
+                            $parts[] = $padding->getRightPaddingPart();
+                        } else {
+                            throw new RuntimeException("something's off" . json_encode([func_get_args(), $a, $b, $c, $methods]));
+                        }
+
+                    } else {
+                        $parts[] = $this->getConcatPart($method, $a, $b, $c);
+                    }
+                    return;
+                }
+            });
         });
-        $this->parts = array_filter($parts);
+        $this->parts = array_values(array_filter($parts));
     }
 
     /**
@@ -169,68 +212,20 @@ class Parser {
         return $this->currentSourceFile;
     }
 
-    public function getConcatPart($mode, $line) {
-
-        $lineBits = explode(" ", $line);
-        $lineBits = array_filter(array_map('trim', $lineBits));
-
+    public function getConcatPart($mode, $from, $to, $modifier) {
         $part = new ConcatPart();
         $part->sourceFile = $this->currentSourceFile;
         $part->mode = $mode;
-        echo "DEBUG: " . json_encode($lineBits) . "\n";
-        fill_object($part, $lineBits, ['from', 'to']);
 
-        if (strlen($part->from) === 5) { $part->from = "00:" . $part->from; }
-        if (strlen($part->to) === 5) { $part->to = "00:" . $part->to; }
-        if (!preg_match('/^[0-9]{2}:[0-9]{2}:[0-9]{2}$/', $part->from)) { throw new RuntimeException('invalid "from" input '); }
-        if (!preg_match('/^[0-9]{2}:[0-9]{2}:[0-9]{2}$/', $part->to)) { throw new RuntimeException('invalid "to" input '); }
+        $part->from = stringToTime($from);
+        $part->to = stringToTime($to);
 
+        $part->modifier = $modifier;
         return $part;
     }
-    public function do_i($line) {
-        return $this->getConcatPart('i', $line);
-    }
-    public function do_n($line) {
-        return $this->getConcatPart('n', $line);
-    }
-    public function do_f($line) {
-        return $this->getConcatPart('f', $line);
-    }
-    public function do_p($line) {
-        $this->currentSourceFile = trim($line);
-    }
-    public function do_if($line) {
-        $middlePart = $this->do_i($line);
-        $padding = new Padding($middlePart);
-        return [
-            $middlePart,
-            $padding->getRightPaddingPart(),
-        ];
-    }
-    public function do_fnf($line) {
-        $middlePart = $this->do_n($line);
-        $padding = new Padding($middlePart);
-        return [
-            $padding->getLeftPaddingPart(),
-            $middlePart,
-            $padding->getRightPaddingPart(),
-        ];
-    }
-    public function do_nf($line) {
-        $middlePart = $this->do_n($line);
-        $padding = new Padding($middlePart);
-        return [
-            $middlePart,
-            $padding->getRightPaddingPart(),
-        ];
-    }
-    public function do_fn($line) {
-        $middlePart = $this->do_n($line);
-        $padding = new Padding($middlePart);
-        return [
-            $padding->getLeftPaddingPart(),
-            $middlePart,
-        ];
+
+    public function do_p(string $file) {
+        $this->currentSourceFile = trim($file);
     }
 }
 
@@ -238,14 +233,29 @@ $parts = (new Parser($cutfile))->getConcatParts();
 
 $modeMap = [
     'i' => 'do_ffmpeg_introed.bat',
+    'i_nots' => 'do_ffmpeg_introed_nots.bat',
     'n' => 'do_ffmpeg.bat',
+    'n_nots' => 'do_ffmpeg_nots.bat',
+    'n_nosound' => 'do_ffmpeg_nosound.bat',
     'f' => 'do_ffmpeg_x4.bat',
 ];
 
 $sourceFiles = implode(', ', array_unique(array_map(function (ConcatPart $part) { return $part->sourceFile; }, $parts)));
 
-echo "sourcefiles: $sourceFiles; cutfile: $cutfile\n. starting in 5s...\n";
-sleep(5);
+$totalLength = array_sum(array_map(function (ConcatPart $part) {
+    return $part->to->diff($part->from)->s;
+}, $parts));
+echo "total length: " . $totalLength . "s\n";
+echo "details:\n";
+echo implode("\n", array_map(function (ConcatPart $part) {
+    return implode(" ", [
+        $part->sourceFile,
+        $part->from->format('H:i:s'),
+        $part->to->format('H:i:s'),
+        $part->modifier ?: '',
+    ]);
+}, $parts)) . "\n";
+echo "sourcefiles: $sourceFiles; cutfile: $cutfile\n. ...\n";
 
 $filestoconcat = array_map(function (ConcatPart $part) use ($modeMap) {
 	$outFilename = $part->getOutFilename();
@@ -255,16 +265,59 @@ $filestoconcat = array_map(function (ConcatPart $part) use ($modeMap) {
 		return $outConcatFilename;
 	}
 
-	$exec = $modeMap[$part->mode];
-	if (!$exec) {	
-		echo "unknown mode {$part->mode}\n";
+    $mode = implode("_", array_filter([$part->mode, $part->modifier]));
+	$exec = $modeMap[$mode];
+	if (!$exec) {
+        $msg = "[EE] unknown mode $mode ( {$part->mode} / {$part->modifier} )";
+		echo $msg . PHP_EOL;
+        throw new RuntimeException($msg);
+        return;
 	}
 
-	$datetime1 = new DateTime($part->from);
-	$datetime2 = new DateTime($part->to);
-	$interval = $datetime2->diff($datetime1);
-	
-	passthru(sprintf("%s %s %s %s", $exec, $part->sourceFile, $part->from, $interval->format('%H:%I:%s')));
+	$lengthString = $part->to->diff($part->from)->format('%H:%I:%s'); // NOTE: interval formatting != date formatting :/
+    $offsetString = $part->from->format('H:i:s');
+
+    $cmd = sprintf("%s %s %s %s", $exec, $part->sourceFile, $offsetString, $lengthString);
+    $pipes = [];
+    $descriptors = [
+        ["file", "php://stdin", "r"],
+        ["pipe", "w"],
+        ["file", "cut.err.log", "w"],
+    ];
+	$proc = proc_open(
+        $cmd,
+        $descriptors,
+        $pipes, // pipes
+        null,
+        null,
+        ['bypass_shell' => true]
+    );
+
+    if (!is_resource($proc)) {
+        throw new RuntimeException("couldnt start process for '$cmd'");
+    }
+
+
+    // stream_set_blocking($pipes[1], false);
+
+    // TODO: have err/out as non-blocking streams and poll both
+    // TODO: also, dont go via bash scripts, theyre stupid
+
+    file_put_contents("cut.out.log", "");
+    // fclose($pipes[0]);
+    while (!feof($pipes[1])) {
+        $out = fgets($pipes[1]);
+        if ($out) {
+            echo ".";
+            file_put_contents("cut.out.log", $out."\n", FILE_APPEND);
+        }
+    }
+    fclose($pipes[1]);
+
+    $exit = proc_close($proc);
+    if ($exit !== 0) {
+        echo "$cmd exited with $exit . see cut.*.log for details";
+    }
 	
 	rename($outFilename, $outConcatFilename);
 	return $outConcatFilename;

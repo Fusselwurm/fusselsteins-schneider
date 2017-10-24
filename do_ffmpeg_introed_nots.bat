@@ -24,17 +24,8 @@ del intro_faded_adhoc.wav
   -ar 22050 ^
   -map 0:1 "%outfile%_game.wav"
 
-"%ffmpeg%" ^
-  -ss %startAt% ^
-  -t %duration% ^
-  -i %infile% ^
-  -af "volume=0.3" ^
-  -af "highpass=f=200, lowpass=f=3000" ^
-  -ar 22050 ^
-  -map 0:2 "%outfile%_ts.wav"
+"%sox%" -M intro_faded_adhoc.wav "%outfile%_game.wav" "%outfile%.wav" remix -m 1,3 2,3
 
-"%sox%" -M intro_faded_adhoc.wav "%outfile%_game.wav" "%outfile%_ts.wav" "%outfile%.wav" remix -m 1,3,5 2,4,5
- 
 "%ffmpeg%" ^
     -ss %startAt% ^
 	-t %duration% ^
@@ -49,9 +40,9 @@ del intro_faded_adhoc.wav
 	-acodec libvorbis ^
 	"%outfile%"
 
-	
+
 if %ERRORLEVEL% GEQ 1 EXIT /B 1
-	
+
 del "%outfile%.wav"
 del "%outfile%_game.wav"
 del "%outfile%_ts.wav"
