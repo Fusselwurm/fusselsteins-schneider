@@ -79,10 +79,11 @@ class ConcatPart {
 
 	public function getFilename(): string {
 		$outFilename = $this->sourceFilenameToOutfilename($this->sourceFile);
-		return sprintf("%s-%s-%s.mkv",
+		return sprintf("%s-%s-%s-%s.mkv",
 			$outFilename,
 			$this->dateTimeToFilenamePart($this->from),
-			$this->dateTimeToFilenamePart($this->to)
+			$this->dateTimeToFilenamePart($this->to),
+			$this->mode
 		);
 	}
 
