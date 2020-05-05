@@ -3,18 +3,19 @@
 
 php cut.php <cutfile>
 
-<cutfile> enthält Zeilen vom Format 
+<cutfile> enthält Zeilen vom Format
 
 [p] <avifile>
-[i|n|f] [von] [bis]
+[i][n][f][h] <von> <bis> [nots|nosound]
 
-wobei [von] und [bis] timestamps im Format hh:mm:ss oder mm:ss sind
-und 
+wobei <von> und <bis> timestamps im Format hh:mm:ss oder mm:ss sind
+und
 * [n]: normalmodus
 * [i]: mit intro als overlay
-* [f]: 4fach zeitbeschleunigung 
+* [f]: 4fach zeitbeschleunigung, ohne sound (darf *nicht* erster teil im zusammenschnitt sein!)
+* [h]: halb so schnell
 
-benötigt werden: do_ffmpeg.bat , do_ffmpeg_introed.bat,  do_ffmpeg_x4.bat, do_concat.bat
+benötigt werden: do_ffmpeg.bat , do_ffmpeg_introed.bat,  do_ffmpeg_x4.bat,  do_ffmpeg_x0.5.bat, do_concat.bat
 
 */
 
@@ -75,24 +76,24 @@ class ConcatPart {
      * @var string nots|nosound
      */
     public $modifier;
-	
+
 	public function getFilename(): string {
 		$outFilename = $this->sourceFilenameToOutfilename($this->sourceFile);
-		return sprintf("%s-%s-%s.mkv", 
-			$outFilename, 
+		return sprintf("%s-%s-%s.mkv",
+			$outFilename,
 			$this->dateTimeToFilenamePart($this->from),
 			$this->dateTimeToFilenamePart($this->to)
 		);
 	}
-	
+
 	public function getOutFilename(): string  {
 		return $this->sourceFilenameToOutfilename($this->sourceFile);
 	}
-	
+
 	private function dateTimeToFilenamePart(DateTime $time): string {
 	    return $time->format('His');
 	}
-	
+
 	private  function sourceFilenameToOutfilename(string $sourceFilename) {
 		return $sourceFilename . ".out.mkv";
 	}
@@ -177,7 +178,7 @@ class Parser {
             $methods = str_split($mode);
 
             array_walk($methods, function (string $method, int $index) use ($a, $b, $c, $methods, &$parts) {
-                if (in_array($method, ['i', 'f', 'n'])) {
+                if (in_array($method, ['i', 'f', 'n', 'h'])) {
                     $numberOfParts = count($methods);
                     if ($method === 'f' && $numberOfParts > 1) {
                         $padding = new Padding($this->getConcatPart('n', $a, $b, $c));
@@ -238,6 +239,7 @@ $modeMap = [
     'n_nots' => 'do_ffmpeg_nots.bat',
     'n_nosound' => 'do_ffmpeg_nosound.bat',
     'f' => 'do_ffmpeg_x4.bat',
+	'h' => 'do_ffmpeg_x0.5.bat',
 ];
 
 $sourceFiles = implode(', ', array_unique(array_map(function (ConcatPart $part) { return $part->sourceFile; }, $parts)));
@@ -318,7 +320,7 @@ $filestoconcat = array_map(function (ConcatPart $part) use ($modeMap) {
     if ($exit !== 0) {
         echo "$cmd exited with $exit . see cut.*.log for details";
     }
-	
+
 	rename($outFilename, $outConcatFilename);
 	return $outConcatFilename;
 }, $parts, array_keys($parts));
