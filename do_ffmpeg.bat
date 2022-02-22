@@ -23,10 +23,18 @@ if not defined duration set duration="02:00:00"
   -t %duration% ^
   -i %infile% ^
   -ar 22050 ^
-  -af "volume=0.3" ^
+  -af "volume=0.7" ^
   -map 0:2 "%outfile%_ts.wav"
 
-"%sox%" -M "%outfile%_game.wav" "%outfile%_ts.wav" "%outfile%.wav" remix -m 1,3 2,3
+  "%ffmpeg%" ^
+    -ss %startAt% ^
+    -t %duration% ^
+    -i %infile% ^
+    -ar 22050 ^
+    -af "volume=0.7" ^
+    -map 0:3 "%outfile%_mike.wav"
+
+"%sox%" -M "%outfile%_game.wav" "%outfile%_ts.wav" "%outfile%_mike.wav" "%outfile%.wav" remix -m 1,3,5 2,4,5
 
 "%ffmpeg%" ^
     -ss %startAt% ^
@@ -41,12 +49,13 @@ if not defined duration set duration="02:00:00"
 	-acodec libvorbis ^
 	"%outfile%"
 
-	
+
 if %ERRORLEVEL% GEQ 1 EXIT /B 1
-	
+
 del "%outfile%.wav"
-del "%outfile%_game.wav"	
+del "%outfile%_game.wav"
 del "%outfile%_ts.wav"
+del "%outfile%_mike.wav"
 
 @REM 	-profile:v high ^
 @REM	-vf scale=iw*0.9:ih*0.9 ^
