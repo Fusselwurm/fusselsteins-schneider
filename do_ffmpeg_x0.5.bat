@@ -38,7 +38,7 @@ if not defined duration set duration="02:00:00"
 	-filter:v "setpts=2*PTS,hue=s=1.2" ^
 	-filter:a "atempo=0.5" ^
 	-preset slow ^
-	-crf 28 ^
+	-crf 18 ^
 	-map 1:0 ^
 	-acodec libvorbis ^
 	"%outfile%"

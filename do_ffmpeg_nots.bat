@@ -27,7 +27,7 @@ if not defined duration set duration="02:00:00"
 	-map 0:0 ^
 	-vcodec h264 ^
 	-preset slow ^
-	-crf 28 ^
+	-crf 18 ^
 	-map 1:0 ^
 	-acodec libvorbis ^
 	"%outfile%"

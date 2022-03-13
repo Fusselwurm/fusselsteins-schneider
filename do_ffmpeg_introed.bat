@@ -51,7 +51,7 @@ del intro_faded_adhoc.wav
 	-map 0:0 ^
 	-vcodec h264 ^
 	-preset slow ^
-	-crf 28 ^
+	-crf 18 ^
 	-vf "movie=intro-faded.mkv:seek_point=0.2, setpts=PTS-STARTPTS [inner]; [inner]fade=type=out:start_time=5:duration=1:alpha=1 [inner_fading]; [in][inner_fading] overlay=eof_action=pass:enable='lte(t,7)' [out]" ^
 	-map 1:0 ^
 	-acodec libvorbis ^
